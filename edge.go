@@ -8,10 +8,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/codegangsta/negroni"
 	"github.com/gorilla/mux"
@@ -19,7 +17,6 @@ import (
 	opentracing "github.com/opentracing/opentracing-go"
 	"sourcegraph.com/sourcegraph/appdash"
 	appdashtracer "sourcegraph.com/sourcegraph/appdash/opentracing"
-	"sourcegraph.com/sourcegraph/appdash/traceapp"
 )
 
 const CtxSpanID = 0
@@ -156,7 +153,7 @@ func addHeaderTags(span opentracing.Span, h http.Header) {
 }
 
 func main() {
-	collector = appdash.NewRemoteCollector("localhost:7701")
+	collector = appdash.NewRemoteCollector("appdash:7701")
 	collector = appdash.NewChunkedCollector(collector)
 	tracer := appdashtracer.NewTracer(collector)
 	opentracing.InitGlobalTracer(tracer)
