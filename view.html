@@ -52,8 +52,8 @@
 <div class="container">
     <div class="row">
         <div class="span12">
-			{{range .Subscriptions}}
-			<h4>{{.Title}} <a href="?delFeedUrl={{.URL}}"><i class="icon-remove"></i> </a></h4>
+			{{range .Feeds}}
+			<h4>{{.Title}} <a href="?delFeedUrl={{.FeedLink}}"><i class="icon-remove"></i> </a></h4>
 				{{range $i, $item := .Items}}
 				{{if lt $i 5}}
 				<p data-container="body" data-content="{{.Description}}" data-trigger="hover" data-placement="right" data-html="true"><a href="{{.Link}}">{{.Title}}</a></p>

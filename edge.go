@@ -7,30 +7,22 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"time"
 
+	"github.com/gorilla/mux"
+	"github.com/mmcdole/gofeed"
 	"github.com/teeratpitakrat/gokieker"
 )
 
-type FeedItem struct {
-	Title       string `json:title`
-	Description string `json:description`
-	Link        string `json:link`
-}
+var (
+	edgeAddrPort       string
+	middletierAddrPort string
+)
 
-type RSSFeed struct {
-	Title string     `json:title`
-	URL   string     `json:url`
-	Items []FeedItem `json:items`
-}
-
-type RSSFeedSubscription struct {
-	Subscriptions []RSSFeed `json:subscriptions`
-	User          string    `json:user`
-}
-
-type RSSFeedSubscriptionOneFeed struct {
-	Subscriptions RSSFeed `json:subscriptions`
-	User          string  `json:user`
+type Subscription struct {
+	Feeds []*gofeed.Feed
+	User  string
 }
 
 func GetRequest(w http.ResponseWriter, req *http.Request) {
@@ -49,12 +41,43 @@ func GetRequest(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func DeleteFeed(w http.ResponseWriter, req *http.Request, username string, url string) {
-	r := gokieker.BeginFunction()
-	defer r.EndFunction()
-	req, err := http.NewRequest("DELETE", "http://middletier:9191/middletier/rss/user/"+username+"?url="+url, nil)
+func ViewFeed(w http.ResponseWriter, req *http.Request, username string) {
+	k := gokieker.BeginFunction()
+	defer k.EndFunction()
+	resp, err := http.Get("http://" + middletierAddrPort + "/middletier/rss/user/" + username)
 	if err != nil {
-		fmt.Println(err)
+		ReturnErrorPage(w, req, err)
+		return
+	}
+	defer resp.Body.Close()
+	var subscription Subscription
+	//ParseRSSFeeds(resp, &feeds)
+	body, err := ioutil.ReadAll(resp.Body)
+	json.Unmarshal(body, &subscription)
+	subscription.User = username
+	t, _ := template.ParseFiles("view.html")
+	t.Execute(w, subscription)
+}
+
+func AddFeed(w http.ResponseWriter, req *http.Request, username string, url string) {
+	k := gokieker.BeginFunction()
+	defer k.EndFunction()
+	resp, err := http.PostForm("http://"+middletierAddrPort+"/middletier/rss/user/"+username+"?url="+url, nil)
+	if err != nil {
+		ReturnErrorPage(w, req, err)
+		return
+	}
+	defer resp.Body.Close()
+	http.Redirect(w, req, "/jsp/rss.jsp?username="+username, 302)
+}
+
+func DeleteFeed(w http.ResponseWriter, req *http.Request, username string, url string) {
+	k := gokieker.BeginFunction()
+	defer k.EndFunction()
+	req, err := http.NewRequest("DELETE", "http://"+middletierAddrPort+"/middletier/rss/user/"+username+"?url="+url, nil)
+	if err != nil {
+		ReturnErrorPage(w, req, err)
+		return
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -64,62 +87,34 @@ func DeleteFeed(w http.ResponseWriter, req *http.Request, username string, url s
 	http.Redirect(w, req, "/jsp/rss.jsp?username="+username, 302)
 }
 
-func AddFeed(w http.ResponseWriter, req *http.Request, username string, url string) {
-	r := gokieker.BeginFunction()
-	defer r.EndFunction()
-	resp, err := http.PostForm("http://middletier:9191/middletier/rss/user/"+username+"?url="+url, nil)
-	if err != nil {
-		fmt.Println("error")
-	}
-	defer resp.Body.Close()
-	http.Redirect(w, req, "/jsp/rss.jsp?username="+username, 302)
-}
-
-func ViewFeed(w http.ResponseWriter, req *http.Request, username string) {
-	r := gokieker.BeginFunction()
-	defer r.EndFunction()
-	resp, err := http.Get("http://middletier:9191/middletier/rss/user/" + username)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer resp.Body.Close()
-	var feeds RSSFeedSubscription
-	ParseRSSFeeds(resp, &feeds)
-	t, _ := template.ParseFiles("view.html")
-	t.Execute(w, &feeds)
-}
-
-func ParseRSSFeeds(resp *http.Response, feeds *RSSFeedSubscription) {
-	r := gokieker.BeginFunction()
-	defer r.EndFunction()
-	body, err := ioutil.ReadAll(resp.Body)
-	bodycopy := make([]byte, len(body))
-	copy(bodycopy, body)
-	if err != nil {
-		fmt.Println(err)
-	}
-	err = json.Unmarshal(body, &feeds)
-	if err != nil {
-		var feed RSSFeedSubscriptionOneFeed
-		err = json.Unmarshal(bodycopy, &feed)
-		if err != nil {
-			fmt.Println(err)
-		}
-		feeds.Subscriptions = make([]RSSFeed, 1)
-		feeds.Subscriptions[0] = feed.Subscriptions
-	}
-}
-
 func Healthcheck(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "<h1>Healthcheck page</h1>")
 }
 
+func ReturnErrorPage(w http.ResponseWriter, req *http.Request, err error) {
+	w.WriteHeader(http.StatusInternalServerError)
+	w.Write([]byte(err.Error()))
+}
+
 func main() {
 	gokieker.StartMonitoring()
-	r := gokieker.BeginFunction()
-	defer r.EndFunction()
-	http.HandleFunc("/jsp/rss.jsp", GetRequest)
-	http.HandleFunc("/healthcheck", Healthcheck)
-	log.Fatal(http.ListenAndServe(":9090", nil))
+	k := gokieker.BeginFunction()
+	defer k.EndFunction()
+
+	edgeAddrPort = os.Getenv("EDGE_LISTEN_ADDR_PORT")
+	middletierAddrPort = os.Getenv("MIDDLETIER_ADDR_PORT")
+	fmt.Println("edge addr:", edgeAddrPort)
+	fmt.Println("middletier addr:", middletierAddrPort)
+
+	r := mux.NewRouter()
+	r.HandleFunc("/jsp/rss.jsp", GetRequest)
+	r.HandleFunc("/healthcheck", Healthcheck)
+	srv := &http.Server{
+		Handler:      r,
+		Addr:         ":9090",
+		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  15 * time.Second,
+	}
+
+	log.Fatal(srv.ListenAndServe())
 }
